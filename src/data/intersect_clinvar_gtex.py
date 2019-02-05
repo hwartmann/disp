@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import re
 import csv
+import io
 import subprocess
 
 
@@ -33,7 +34,7 @@ def filter_variant_summary(variant_summary=None,
         print("{end} of {beg} variant_summary entries have been selected".format(beg=total_variants,
                                                                                  end=selected_variants))
 
-        variant_summary.to_csv(path_to_interim+'filtered_variant_summary.csv')
+        variant_summary.to_csv(path_to_interim+'filtered_variant_summary.csv', index=False)
 
         return variant_summary
     else:
@@ -51,7 +52,7 @@ def add_coid(variant_summary=None,
                                   variant_summary['Start'].astype(str).str[-7:] + "-" +\
                                   variant_summary['Stop'].astype(str).str[-7:]
 
-        variant_summary.to_csv(path_to_interim+'COID_filtered_variant_summary.csv')
+        variant_summary.to_csv(path_to_interim+'COID_filtered_variant_summary.csv', index=False)
 
         return variant_summary
     else:
@@ -92,6 +93,10 @@ def expand_variant_summary(variant_summary=None,
         total = variant_summary.shape[0]
         progress = 0
 
+        output = io.StringIO()
+        csv_writer = csv.writer(output)
+        csv_writer.writerow(list(variant_summary.columns.values))
+
         for idx, row in variant_summary.iterrows():
             if progress % 10000 == 0:
                 print("clinvar expand {}%".format(round(progress / total, 2) * 100))
@@ -105,43 +110,21 @@ def expand_variant_summary(variant_summary=None,
                 ids = get_phenotype_list(semi_id, row[12])
                 for i in range(len(semi_type)):
 
-                    df_tmp = df_tmp.append({'#AlleleID': row[0],
-                                            'Type': row[1],
-                                            'Name': row[2],
-                                            'GeneID': row[3],
-                                            'GeneSymbol': row[4],
-                                            'HGNC_ID': row[5],
-                                            'ClinicalSignificance': row[6],
-                                            'ClinSigSimple': row[7],
-                                            'LastEvaluated': row[8],
-                                            'RS# (dbSNP)': row[9],
-                                            'nsv/esv (dbVar)': row[10],
-                                            'RCVaccession': row[11],
-                                            'PhenotypeIDS': ids[i],
-                                            'PhenotypeList': samp[i],
-                                            'Origin': row[14], 'OriginSimple': row[15], 'Assembly': row[16],
-                                            'ChromosomeAccession': row[17],
-                                            'Chromosome': str(row[18]),
-                                            'Start': str(row[19]),
-                                            'Stop': str(row[20]),
-                                            'ReferenceAllele': row[21],
-                                            'AlternateAllele': row[22],
-                                            'Cytogenetic': row[23],
-                                            'ReviewStatus': row[24],
-                                            'NumberSubmitters': row[25],
-                                            'Guidelines': row[26],
-                                            'TestedInGTR': row[27],
-                                            'OtherIDs': row[28],
-                                            'SubmitterCategories': row[29],
-                                            'VariationID': row[30],
-                                            'COID': row[31]
-                                            }, ignore_index=True)
+                    row['PhenotypeIDS'] = ids[i]
+                    row['PhenotypeList'] = samp[i]
+                    csv_writer.writerow(row)
 
             progress += 1
 
+        output.seek(0)  # we need to get back to the start of the BytesIO
+        df = pd.read_csv(output)
+
         variant_summary.drop(idx_pop, inplace=True)
-        variant_summary = variant_summary.append(df_tmp)
-        variant_summary.to_csv(path_to_interim+'expanded_variant_summary.csv')
+        variant_summary.to_csv(path_to_interim+'var_only.csv')
+        df.to_csv(path_to_interim+'df_only.csv')
+
+        variant_summary = variant_summary.append(df)
+        variant_summary.to_csv(path_to_interim+'expanded_variant_summary.csv', index=False)
 
         return variant_summary
 
@@ -187,27 +170,32 @@ def make_gtex_bed(path_gtex_exon_annotation=None,
                            low_memory=False)
 
         gtex['chr'] = "chr" + gtex['chr'].astype(str)
-        gtex.to_csv(path_to_interim+'bed_gtex_exons.bed', index=False, header=False, sep='\t')
+        gtex = gtex[['chr', 'start_pos', 'end_pos', 'exon_id']]
+        gtex.to_csv(path_to_interim+'bed_gtex_exons.bed', index=False, header=False)
 
 
-def intersect(file_a=None,
-              file_b=None,
-              path_to_interim='../../data/interim/'):
-    """
-    run bedtools to intersect variants with exons. Needs absolute paths!
-
-    :param file_a: bed_gtex_exons.bed
-    :param file_b: bed_variant_summary.bed
-    :param path_to_interim:
-    :return:
-    """
-    if not os.path.isfile(path_to_interim+'bed_gtex_clinvar_intersect.bed'):
-        subprocess.run('bedtools intersect -a {file_a} \
-             -b {file_b} -wa -wb \
-                  > {target}'.format(file_a=file_a,
-                                     file_b=file_b,
-                                     target=path_to_interim+'bed_gtex_clinvar_intersect.bed'),
-                       shell=True)
+# def intersect(file_a=None,
+#               file_b=None,
+#               path_to_interim='../../data/interim/'):
+#     """
+#     run bedtools to intersect variants with exons. Needs absolute paths!
+#
+#     :param file_a: bed_gtex_exons.bed
+#     :param file_b: bed_variant_summary.bed
+#     :param path_to_interim:
+#     :return:
+#     """
+#     print(path_to_interim)
+#     if not os.path.isfile(path_to_interim+'bed_gtex_clinvar_intersect.bed'):
+#         try:
+#             subprocess.run(
+#                 'bedtools intersect -a {file_a} -b {file_b} -wa -wb > {target}'.format(file_a=file_a,
+#                                                                                        file_b=file_b,
+#                                                                                        target=path_to_interim + \
+#                                                                                     'bed_gtex_clinvar_intersect.bed'),
+#             shell=True)
+#         except:
+#             print("test")
 
 
 if __name__ == '__main__':
@@ -237,6 +225,6 @@ if __name__ == '__main__':
     make_variant_bed(variant_summary, path_to_interim=path_interim)
     make_gtex_bed(path_gtex_exon_annotation, path_to_interim=path_interim)
 
-    intersect(path_root_interim+'bed_gtex_exons.bed',
-              path_root_interim+'bed_variant_summary.bed',
-              path_to_interim=path_interim)
+    # intersect(path_root_interim+'bed_gtex_exons.bed',
+    #           path_root_interim+'bed_variant_summary.bed',
+    #           path_to_interim=path_interim)
